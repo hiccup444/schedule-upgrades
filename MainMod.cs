@@ -13,11 +13,20 @@ using ScheduleOne.DevUtilities;
 using ScheduleOne.Storage;
 using ScheduleOne.Money;
 using ScheduleOne.PlayerScripts;
+using HarmonyLib;
+using ScheduleOne.ItemFramework;
+using System.Linq;
 
 namespace EasyUpgrades
 {
     public class EasyUpgradesMain : MelonMod
     {
+
+        // Static fields to track stack limit upgrades
+        public static int CurrentStackLimit { get; private set; } = 20; // Starting value
+        public static int MaxStackLimitUpgrades { get; } = 3; // Maximum number of upgrades
+        public static int CurrentStackLimitUpgrades { get; private set; } = 0;
+
         // Backpack constants and variables
         private const int ROWS = 4;
         private const int COLUMNS = 3;
@@ -43,13 +52,21 @@ namespace EasyUpgrades
             // Register MelonPrefs
             MelonPreferences.CreateCategory(PREFS_CATEGORY);
             MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_BACKPACK_LEVEL, 0, "Backpack upgrade level");
+            // Add a new entry for stack limit upgrades
+            MelonPreferences.CreateEntry(PREFS_CATEGORY, "StackLimitUpgrades", 0, "Number of stack limit upgrades");
             MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_SAVE_ORGANISATION, "", "Current save organisation name");
 
             // Load preferences
             backpackLevel = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, PREF_BACKPACK_LEVEL);
             currentSaveOrganisation = MelonPreferences.GetEntryValue<string>(PREFS_CATEGORY, PREF_SAVE_ORGANISATION);
 
-            MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Save: {currentSaveOrganisation}");
+            // Load stack limit upgrades
+            CurrentStackLimitUpgrades = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, "StackLimitUpgrades");
+
+            // Set the current stack limit based on saved upgrades
+            CurrentStackLimit = 20 + (CurrentStackLimitUpgrades * 10);
+
+            MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Stack Limit Upgrades: {CurrentStackLimitUpgrades}, Save: {currentSaveOrganisation}");
             MelonLogger.Msg("BackpackMod initialized. Thank you to Tugakit for the code reference.");
             MelonLogger.Error("Items in this backpack will be LOST when you exit the game or the save!");
         }
@@ -98,24 +115,153 @@ namespace EasyUpgrades
         {
             MelonLogger.Msg($"Scene initialized: {sceneName}");
 
-            if (sceneName != "Main")
+            if (sceneName == "Main")
             {
-                if (backpackEntity != null)
+                try
                 {
-                    backpackEntity.gameObject.SetActive(false);
+                    // Start a coroutine to attempt patching after a delay
+                    MelonCoroutines.Start(RetryStackLimitPatch());
                 }
-                return;
-            }
+                catch (Exception ex)
+                {
+                    MelonLogger.Error($"Error initiating stack limit patch: {ex.Message}");
+                }
 
-            // Only set up the backpack if the player has purchased it
-            if (backpackLevel > 0)
+                // Existing backpack setup code
+                if (backpackLevel > 0)
+                {
+                    MelonLogger.Msg($"Player has backpack level {backpackLevel}, setting up backpack...");
+                    MelonCoroutines.Start(SetupBackpack());
+                }
+                else
+                {
+                    MelonLogger.Msg("Player hasn't purchased backpack yet");
+                }
+            }
+        }
+
+        private IEnumerator RetryStackLimitPatch()
+        {
+            // Wait 10 seconds before attempting to patch
+            yield return new WaitForSeconds(10f);
+
+            try
             {
-                MelonLogger.Msg($"Player has backpack level {backpackLevel}, setting up backpack...");
-                MelonCoroutines.Start(SetupBackpack());
+                // Find all item definitions
+                var itemDefinitions = Resources.FindObjectsOfTypeAll<ItemDefinition>();
+
+                if (itemDefinitions.Length == 0)
+                {
+                    MelonLogger.Error("No item definitions found!");
+                    yield break;
+                }
+
+                // Modify stack limit for all item definitions
+                foreach (var def in itemDefinitions)
+                {
+                    try
+                    {
+                        // Use reflection to modify the StackLimit field
+                        var stackLimitField = typeof(ItemDefinition).GetField("StackLimit",
+                            System.Reflection.BindingFlags.Public |
+                            System.Reflection.BindingFlags.NonPublic |
+                            System.Reflection.BindingFlags.Instance);
+
+                        if (stackLimitField != null)
+                        {
+                            stackLimitField.SetValue(def, CurrentStackLimit);
+                            MelonLogger.Msg($"Updated {def.Name} stack limit to {CurrentStackLimit}");
+                        }
+                        else
+                        {
+                            MelonLogger.Error($"Could not find StackLimit field for {def.Name}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Error($"Error updating stack limit for {def?.Name ?? "Unknown"}: {ex.Message}");
+                    }
+                }
+
+                // Attempt to patch the method as a backup
+                var methods = typeof(ItemDefinition).GetMethods(
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Static
+                );
+
+                var originalMethod = methods.FirstOrDefault(m =>
+                    m.Name == "get_StackLimit" &&
+                    m.ReturnType == typeof(int)
+                );
+
+                if (originalMethod != null)
+                {
+                    HarmonyInstance.Patch(
+                        originalMethod,
+                        postfix: new HarmonyMethod(AccessTools.Method(typeof(EasyUpgradesMain), nameof(StackLimitPatch)))
+                    );
+
+                    MelonLogger.Msg($"Successfully patched method: {originalMethod.Name}");
+                }
+                else
+                {
+                    MelonLogger.Error("Could not find StackLimit method after direct modification");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Error in stack limit patch: {ex.Message}");
+                MelonLogger.Error(ex.StackTrace);
+            }
+        }
+
+        private static void StackLimitPatch(ItemDefinition __instance, ref int __result)
+        {
+            // Ensure the result is set to the current stack limit
+            __result = CurrentStackLimit;
+        }
+
+        public void UpgradeStackLimit()
+        {
+            if (CurrentStackLimitUpgrades < MaxStackLimitUpgrades)
+            {
+                CurrentStackLimit += 10;
+                CurrentStackLimitUpgrades++;
+
+                MelonLogger.Msg($"Stack Limit Upgraded to {CurrentStackLimit}. Upgrade level: {CurrentStackLimitUpgrades}/{MaxStackLimitUpgrades}");
+
+                // Attempt to modify all existing item definitions
+                var itemDefinitions = Resources.FindObjectsOfTypeAll<ItemDefinition>();
+                foreach (var def in itemDefinitions)
+                {
+                    try
+                    {
+                        // Use reflection to modify the private field
+                        var stackLimitField = typeof(ItemDefinition).GetField("StackLimit", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+
+                        if (stackLimitField != null)
+                        {
+                            stackLimitField.SetValue(def, CurrentStackLimit);
+                            MelonLogger.Msg($"Updated {def.Name} stack limit to {CurrentStackLimit}");
+                            MelonPreferences.SetEntryValue(PREFS_CATEGORY, "StackLimitUpgrades", CurrentStackLimitUpgrades);
+                            MelonPreferences.Save();
+                        }
+                        else
+                        {
+                            MelonLogger.Error($"Could not find StackLimit field for {def.Name}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Error($"Error updating stack limit for {def.Name}: {ex.Message}");
+                    }
+                }
             }
             else
             {
-                MelonLogger.Msg("Player hasn't purchased backpack yet");
+                MelonLogger.Msg("Maximum stack limit upgrades reached!");
             }
         }
 
@@ -428,10 +574,17 @@ namespace EasyUpgrades
 
             // Update backpack upgrade level based on saved data
             int backpackLevel = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "BackpackLevel");
+            int stackLimitUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "StackLimitUpgrades");
             if (backpackLevel > 0 && upgrades.Count > 0)
             {
                 // Update the displayed backpack level
                 upgrades[0].Name = $"BackPack ({backpackLevel}/1)";
+            }
+
+            if (stackLimitUpgrades >= 3 && upgrades.Count > 1)
+            {
+                // Update the displayed stack size level
+                upgrades[1].Name = $"Stack Size ({stackLimitUpgrades}/3)";
             }
 
             // Create a Grid Layout
@@ -603,67 +756,154 @@ namespace EasyUpgrades
             btnText.color = Color.white;
             btnText.fontStyle = FontStyles.Bold;
 
-            // Add click handler for the button - special handling for backpack
+            // Add click handler for the button
             buyBtn.onClick.AddListener(() =>
             {
                 if (item.Name.StartsWith("BackPack"))
                 {
-                    // Parse current level from item name
-                    string levelStr = item.Name.Substring(item.Name.IndexOf("(") + 1, 1);
-                    int currentLevel;
-                    if (int.TryParse(levelStr, out currentLevel))
-                    {
-                        // Check if we can upgrade further
-                        if (currentLevel < 1) // Max level is 1
-                        {
-                            // Try to spend money first
-                            if (TrySpendMoney(item.Price))
-                            {
-                                // Upgrade the backpack
-                                EasyUpgradesMain.Instance.UpgradeBackpack(1);
-
-                                // Update the display name
-                                nameText.text = "BackPack (1/1)";
-
-                                // Disable the button
-                                btnImg.color = Color.red;
-                                btnText.text = "Max";
-                                buyBtn.interactable = false;
-                            }
-                            else
-                            {
-                                MelonLogger.Msg("Cannot afford backpack upgrade!");
-                                // Maybe a "not enough money" popup later?
-                            }
-                        }
-                        else
-                        {
-                            MelonLogger.Msg("Backpack already at max level!");
-                        }
-                    }
-                    else
-                    {
-                        MelonLogger.Error("Failed to parse backpack level from name!");
-                    }
+                    HandleBackpackUpgrade(item, nameText, btnImg, btnText, buyBtn);
+                }
+                else if (item.Name.StartsWith("Stack Size"))
+                {
+                    HandleStackSizeUpgrade(item, nameText, btnImg, btnText, buyBtn);
                 }
                 else
                 {
                     // Default handler for other items
-                    if (TrySpendMoney(item.Price))
-                    {
-                        MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
-                        // Add specific upgrade logic for other items
-                    }
-                    else
-                    {
-                        MelonLogger.Msg($"Cannot afford {item.Name}!");
-                        // Optional: Show a "Not enough money" popup or visual indicator
-                    }
+                    HandleDefaultUpgrade(item);
                 }
             });
 
+            // Check and apply max upgrade state on initialization
+            ApplyMaxUpgradeState(item, nameText, btnImg, btnText, buyBtn);
+
             MelonLogger.Msg("Created card for item: " + item.Name);
         }
+
+        private void ApplyMaxUpgradeState(UpgradeItem item, TextMeshProUGUI nameText, Image btnImg, TextMeshProUGUI btnText, Button buyBtn)
+        {
+            if (item.Name.StartsWith("BackPack"))
+            {
+                int backpackLevel = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "BackpackLevel");
+                if (backpackLevel >= 1)
+                {
+                    nameText.text = "BackPack (1/1)";
+                    btnImg.color = Color.red;
+                    btnText.text = "Max";
+                    buyBtn.interactable = false;
+                }
+            }
+            else if (item.Name.StartsWith("Stack Size"))
+            {
+                int stackLimitUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "StackLimitUpgrades");
+                if (stackLimitUpgrades >= 3)
+                {
+                    nameText.text = $"Stack Size ({stackLimitUpgrades}/3)";
+                    btnImg.color = Color.red;
+                    btnText.text = "Max";
+                    buyBtn.interactable = false;
+                }
+            }
+        }
+
+        private void HandleBackpackUpgrade(UpgradeItem item, TextMeshProUGUI nameText, Image btnImg, TextMeshProUGUI btnText, Button buyBtn)
+        {
+            // Parse current level from item name
+            string levelStr = item.Name.Substring(item.Name.IndexOf("(") + 1, 1);
+            int currentLevel;
+            if (int.TryParse(levelStr, out currentLevel))
+            {
+                // Check if we can upgrade further
+                if (currentLevel < 1) // Max level is 1
+                {
+                    // Try to spend money first
+                    if (TrySpendMoney(item.Price))
+                    {
+                        // Upgrade the backpack
+                        EasyUpgradesMain.Instance.UpgradeBackpack(1);
+
+                        // Update the display name
+                        nameText.text = "BackPack (1/1)";
+
+                        // Disable the button
+                        btnImg.color = Color.red;
+                        btnText.text = "Max";
+                        buyBtn.interactable = false;
+                    }
+                    else
+                    {
+                        MelonLogger.Msg("Cannot afford backpack upgrade!");
+                    }
+                }
+                else
+                {
+                    MelonLogger.Msg("Backpack already at max level!");
+                    // Disable the button
+                    btnImg.color = Color.red;
+                    btnText.text = "Max";
+                    buyBtn.interactable = false;
+                }
+            }
+            else
+            {
+                MelonLogger.Error("Failed to parse backpack level from name!");
+            }
+        }
+
+        private void HandleStackSizeUpgrade(UpgradeItem item, TextMeshProUGUI nameText, Image btnImg, TextMeshProUGUI btnText, Button buyBtn)
+        {
+            // Stack Size upgrade logic
+            int currentUpgrades = EasyUpgradesMain.CurrentStackLimitUpgrades;
+
+            if (currentUpgrades < 3)
+            {
+                // Try to spend money first
+                if (TrySpendMoney(item.Price))
+                {
+                    // Upgrade the stack limit
+                    EasyUpgradesMain.Instance.UpgradeStackLimit();
+
+                    // Update the display name
+                    nameText.text = $"Stack Size ({currentUpgrades + 1}/3)";
+
+                    // Check if max upgrades reached
+                    if (currentUpgrades + 1 >= 3)
+                    {
+                        // Disable the button
+                        btnImg.color = Color.red;
+                        btnText.text = "Max";
+                        buyBtn.interactable = false;
+                    }
+                }
+                else
+                {
+                    MelonLogger.Msg("Cannot afford stack size upgrade!");
+                }
+            }
+            else
+            {
+                MelonLogger.Msg("Stack size already at max level!");
+                // Disable the button
+                btnImg.color = Color.red;
+                btnText.text = "Max";
+                buyBtn.interactable = false;
+            }
+        }
+
+        private void HandleDefaultUpgrade(UpgradeItem item)
+        {
+            // Default handler for other items
+            if (TrySpendMoney(item.Price))
+            {
+                MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
+                // Add specific upgrade logic for other items
+            }
+            else
+            {
+                MelonLogger.Msg($"Cannot afford {item.Name}!");
+            }
+        }
+
         // Simple placeholder sprite
         private Sprite CreatePlaceholderSprite(Color color)
         {
