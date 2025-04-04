@@ -467,7 +467,7 @@ namespace EasyUpgrades
         private List<UpgradeItem> upgrades = new List<UpgradeItem>()
         {
             new UpgradeItem("BackPack (0/1)", 100, Color.green),
-            new UpgradeItem("Stack Size (0/2)", 100, Color.yellow),
+            new UpgradeItem("Stack Size (0/3)", 100, Color.yellow),
             new UpgradeItem("Vehicle Storage (0/2)", 100, Color.magenta),
             new UpgradeItem("Sprint Speed (0/3)", 100, Color.cyan),
             new UpgradeItem("Max Workers (0/3)", 100, Color.red),
@@ -669,16 +669,16 @@ namespace EasyUpgrades
             // Use a vertical layout group to organize elements
             VerticalLayoutGroup vlg = card.AddComponent<VerticalLayoutGroup>();
             vlg.childAlignment = TextAnchor.UpperCenter;
-            vlg.spacing = 10f;
-            vlg.padding = new RectOffset(20, 20, 10, 20);
+            vlg.spacing = 15f;
+            vlg.padding = new RectOffset(20, 20, 20, 20);
 
             GameObject iconContainer = new GameObject("IconContainer");
             iconContainer.transform.SetParent(card.transform, false);
             RectTransform iconContainerRT = iconContainer.AddComponent<RectTransform>();
-            iconContainerRT.sizeDelta = new Vector2(120, 120);
+            iconContainerRT.sizeDelta = new Vector2(120, 140);
 
             Image iconImg = iconContainer.AddComponent<Image>();
-            iconImg.sprite = CreatePlaceholderSprite(item.ColorTint);
+            iconImg.sprite = CreateCustomSprite(item.Name, item.ColorTint);
             iconImg.preserveAspect = true;
 
             GameObject nameGO = new GameObject("Name");
@@ -904,7 +904,52 @@ namespace EasyUpgrades
             }
         }
 
-        // Simple placeholder sprite
+        private Sprite CreateCustomSprite(string itemName, Color fallbackColor)
+        {
+            try
+            {
+                string modFolder = Path.Combine(MelonEnvironment.ModsDirectory, "EasyUpgrades");
+                string filePath = "";
+
+                if (itemName.StartsWith("BackPack"))
+                {
+                    filePath = Path.Combine(modFolder, "upgrade_backpack.png");
+                }
+                else if (itemName.StartsWith("Stack Size"))
+                {
+                    filePath = Path.Combine(modFolder, "upgrade_stacksize.png");
+                }
+
+                if (File.Exists(filePath))
+                {
+                    byte[] fileData = File.ReadAllBytes(filePath);
+                    Texture2D tex = new Texture2D(2, 2);
+                    if (ImageConversion.LoadImage(tex, fileData))
+                    {
+                        return Sprite.Create(
+                            tex,
+                            new Rect(0, 0, tex.width, tex.height),
+                            new Vector2(0.5f, 0.5f)
+                        );
+                    }
+                    else
+                    {
+                        MelonLogger.Warning($"Failed to load image data for {itemName} icon.");
+                    }
+                }
+                else
+                {
+                    MelonLogger.Warning($"Custom icon file not found at: {filePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Exception loading custom {itemName} icon: {ex}");
+            }
+
+            // Fallback to placeholder sprite if custom icon fails
+            return CreatePlaceholderSprite(fallbackColor);
+        }
         private Sprite CreatePlaceholderSprite(Color color)
         {
             int size = 96;
