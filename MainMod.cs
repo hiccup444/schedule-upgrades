@@ -573,8 +573,8 @@ namespace EasyUpgrades
             new UpgradeItem("BackPack (0/1)", 100, Color.green),
             new UpgradeItem("Stack Size (0/3)", 100, Color.yellow),
             new UpgradeItem("Vehicle Storage (0/2)", 100, Color.magenta),
-            new UpgradeItem("Sprint Speed (0/3)", 100, Color.cyan),
-            new UpgradeItem("Max Workers (0/3)", 100, Color.red),
+            new UpgradeItem("Test", 100, Color.cyan),
+            new UpgradeItem("Max Workers", 100, Color.red),
             new UpgradeItem("Test", 100, new Color(1f, 0.65f, 0f, 1f)),
             new UpgradeItem("Test", 100, new Color(0.3f, 0.8f, 0.3f, 1f)),
             new UpgradeItem("Test", 100, Color.white),
@@ -694,7 +694,7 @@ namespace EasyUpgrades
             int workersUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "MaxWorkersUpgrade");
             if (workersUpgrades > 0 && upgrades.Count > 4)
             {
-                upgrades[4].Name = $"Max Workers ({workersUpgrades}/3)";
+                upgrades[4].Name = $"Max Workers";
             }
             // Create a Grid Layout
             GameObject gridContainer = new GameObject("GridContainer");
@@ -884,7 +884,7 @@ namespace EasyUpgrades
                         if (TrySpendMoney(item.Price))
                         {
                             EasyUpgradesMain.Instance.UpgradeMaxWorkers();
-                            nameText.text = $"Max Workers ({currentWorkersUpgrade + 1}/3)";
+                            nameText.text = $"Max Workers";
                             if (currentWorkersUpgrade + 1 >= EasyUpgradesMain.MaxWorkersUpgradeLimit)
                             {
                                 btnImg.color = Color.red;
@@ -948,7 +948,7 @@ namespace EasyUpgrades
                 int workersUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "MaxWorkersUpgrade");
                 if (workersUpgrades >= EasyUpgradesMain.MaxWorkersUpgradeLimit)
                 {
-                    nameText.text = $"Max Workers ({workersUpgrades}/3)";
+                    nameText.text = $"Max Workers";
                     btnImg.color = Color.red;
                     btnText.text = "Max";
                     buyBtn.interactable = false;
@@ -1070,6 +1070,10 @@ namespace EasyUpgrades
                 {
                     filePath = Path.Combine(modFolder, "upgrade_stacksize.png");
                 }
+                else if (itemName.StartsWith("Max Workers"))
+                {
+                    filePath = Path.Combine(modFolder, "upgrade_employee.png");
+                }
 
                 if (File.Exists(filePath))
                 {
@@ -1101,6 +1105,7 @@ namespace EasyUpgrades
             // Fallback to placeholder sprite if custom icon fails
             return CreatePlaceholderSprite(fallbackColor);
         }
+
         private Sprite CreatePlaceholderSprite(Color color)
         {
             int size = 96;
