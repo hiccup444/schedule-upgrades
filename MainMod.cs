@@ -27,6 +27,11 @@ namespace EasyUpgrades
         public static int MaxStackLimitUpgrades { get; } = 3; // Maximum number of upgrades
         public static int CurrentStackLimitUpgrades { get; private set; } = 0;
 
+        // Workers
+        public static int CurrentMaxWorkersUpgrade { get; private set; } = 0;
+        public static int MaxWorkersUpgradeLimit { get; } = 3;
+        private const string PREF_MAX_WORKERS = "MaxWorkersUpgrade";
+
         // Backpack constants and variables
         private const int ROWS = 4;
         private const int COLUMNS = 3;
@@ -52,22 +57,19 @@ namespace EasyUpgrades
             // Register MelonPrefs
             MelonPreferences.CreateCategory(PREFS_CATEGORY);
             MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_BACKPACK_LEVEL, 0, "Backpack upgrade level");
-            // Add a new entry for stack limit upgrades
             MelonPreferences.CreateEntry(PREFS_CATEGORY, "StackLimitUpgrades", 0, "Number of stack limit upgrades");
+            MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_MAX_WORKERS, 0, "Max Workers Upgrade Level");
             MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_SAVE_ORGANISATION, "", "Current save organisation name");
 
             // Load preferences
             backpackLevel = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, PREF_BACKPACK_LEVEL);
             currentSaveOrganisation = MelonPreferences.GetEntryValue<string>(PREFS_CATEGORY, PREF_SAVE_ORGANISATION);
-
-            // Load stack limit upgrades
             CurrentStackLimitUpgrades = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, "StackLimitUpgrades");
-
-            // Set the current stack limit based on saved upgrades
             CurrentStackLimit = 20 + (CurrentStackLimitUpgrades * 10);
+            CurrentMaxWorkersUpgrade = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, PREF_MAX_WORKERS);
 
-            MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Stack Limit Upgrades: {CurrentStackLimitUpgrades}, Save: {currentSaveOrganisation}");
-            MelonLogger.Msg("BackpackMod initialized. Thank you to Tugakit for the code reference.");
+            MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Stack Limit Upgrades: {CurrentStackLimitUpgrades}, Employee Level: {CurrentMaxWorkersUpgrade}");
+            MelonLogger.Msg("EasyUpgrades initialized.");
             MelonLogger.Error("Items in this backpack will be LOST when you exit the game or the save!");
         }
 
@@ -121,6 +123,7 @@ namespace EasyUpgrades
                 {
                     // Start a coroutine to attempt patching after a delay
                     MelonCoroutines.Start(RetryStackLimitPatch());
+                    MelonCoroutines.Start(UpdateEmployeeCapacitiesWhenReady());
                 }
                 catch (Exception ex)
                 {
@@ -214,6 +217,108 @@ namespace EasyUpgrades
                 MelonLogger.Error($"Error in stack limit patch: {ex.Message}");
                 MelonLogger.Error(ex.StackTrace);
             }
+        }
+
+        public void UpdateEmployeeCapacities()
+        {
+            int bonus = CurrentMaxWorkersUpgrade * 3;
+
+            // Using the new defaults:
+            // Barn: 10, Dock: 10, Sweatshop: 1, Motel: 0, Bungalow: 5
+
+            // Update Barn
+            GameObject barnGO = GameObject.Find("Barn");
+            if (barnGO != null)
+            {
+                var barnProp = barnGO.GetComponent<ScheduleOne.Property.Property>(); // adjust to your type
+                if (barnProp != null)
+                {
+                    barnProp.EmployeeCapacity = 10 + bonus;
+                    MelonLogger.Msg($"Barn capacity set to {barnProp.EmployeeCapacity}");
+                }
+            }
+
+            // Update Dock (assumed to be "DocksWarehouse")
+            GameObject dockGO = GameObject.Find("DocksWarehouse");
+            if (dockGO != null)
+            {
+                var dockProp = dockGO.GetComponent<ScheduleOne.Property.Property>(); // adjust to your type
+                if (dockProp != null)
+                {
+                    dockProp.EmployeeCapacity = 10 + bonus;
+                    MelonLogger.Msg($"Dock capacity set to {dockProp.EmployeeCapacity}");
+                }
+            }
+
+            GameObject sweatshopGO = GameObject.Find("@Properties/Sweatshop");
+            if (sweatshopGO == null)
+            {
+                MelonLogger.Warning("Sweatshop GameObject not found!");
+            }
+            else
+            {
+                var sweatshopProp = sweatshopGO.GetComponent<ScheduleOne.Property.Sweatshop>();
+                if (sweatshopProp == null)
+                {
+                    MelonLogger.Warning("Sweatshop component not found on Sweatshop GameObject!");
+                }
+                else
+                {
+                    sweatshopProp.EmployeeCapacity = 1 + bonus;
+                    MelonLogger.Msg($"Sweatshop capacity set to {sweatshopProp.EmployeeCapacity}");
+                }
+            }
+
+            // Update Motel
+            GameObject motelGO = GameObject.Find("@Properties/MotelRoom");
+            if (motelGO != null)
+            {
+                var motelProp = motelGO.GetComponent<ScheduleOne.Property.MotelRoom>(); // adjust if necessary
+                if (motelProp != null)
+                {
+                    motelProp.EmployeeCapacity = 0 + bonus;
+                    MelonLogger.Msg($"Motel capacity set to {motelProp.EmployeeCapacity}");
+                }
+            }
+
+            // Update Bungalow
+            GameObject bungalowGO = GameObject.Find("@Properties/Bungalow");
+            if (bungalowGO != null)
+            {
+                var bungalowProp = bungalowGO.GetComponent<ScheduleOne.Property.Bungalow>(); // adjust to your type
+                if (bungalowProp != null)
+                {
+                    bungalowProp.EmployeeCapacity = 5 + bonus;
+                    MelonLogger.Msg($"Bungalow capacity set to {bungalowProp.EmployeeCapacity}");
+                }
+            }
+        }
+
+        public void UpgradeMaxWorkers()
+        {
+            if (CurrentMaxWorkersUpgrade < MaxWorkersUpgradeLimit)
+            {
+                CurrentMaxWorkersUpgrade++;
+                MelonLogger.Msg($"Max Workers Upgrade increased to {CurrentMaxWorkersUpgrade}/{MaxWorkersUpgradeLimit}");
+                MelonPreferences.SetEntryValue(PREFS_CATEGORY, PREF_MAX_WORKERS, CurrentMaxWorkersUpgrade);
+                MelonPreferences.Save();
+
+                UpdateEmployeeCapacities();
+            }
+            else
+            {
+                MelonLogger.Msg("Max Workers Upgrade already at maximum!");
+            }
+        }
+
+        private IEnumerator UpdateEmployeeCapacitiesWhenReady()
+        {
+            while (PlayerSingleton<AppsCanvas>.Instance == null)
+            {
+                yield return null;
+            }
+            // Now that the scene is ready, update employee capacities.
+            UpdateEmployeeCapacities();
         }
 
         private static void StackLimitPatch(ItemDefinition __instance, ref int __result)
@@ -586,6 +691,11 @@ namespace EasyUpgrades
                 upgrades[1].Name = $"Stack Size ({stackLimitUpgrades}/3)";
             }
 
+            int workersUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "MaxWorkersUpgrade");
+            if (workersUpgrades > 0 && upgrades.Count > 4)
+            {
+                upgrades[4].Name = $"Max Workers ({workersUpgrades}/3)";
+            }
             // Create a Grid Layout
             GameObject gridContainer = new GameObject("GridContainer");
             gridContainer.transform.SetParent(this.appContainer, false);
@@ -766,12 +876,42 @@ namespace EasyUpgrades
                 {
                     HandleStackSizeUpgrade(item, nameText, btnImg, btnText, buyBtn);
                 }
+                else if (item.Name.StartsWith("Max Workers"))
+                {
+                    int currentWorkersUpgrade = EasyUpgradesMain.CurrentMaxWorkersUpgrade;
+                    if (currentWorkersUpgrade < EasyUpgradesMain.MaxWorkersUpgradeLimit)
+                    {
+                        if (TrySpendMoney(item.Price))
+                        {
+                            EasyUpgradesMain.Instance.UpgradeMaxWorkers();
+                            nameText.text = $"Max Workers ({currentWorkersUpgrade + 1}/3)";
+                            if (currentWorkersUpgrade + 1 >= EasyUpgradesMain.MaxWorkersUpgradeLimit)
+                            {
+                                btnImg.color = Color.red;
+                                btnText.text = "Max";
+                                buyBtn.interactable = false;
+                            }
+                        }
+                        else
+                        {
+                            MelonLogger.Msg("Cannot afford Max Workers upgrade!");
+                        }
+                    }
+                    else
+                    {
+                        MelonLogger.Msg("Max Workers upgrade already at max!");
+                        btnImg.color = Color.red;
+                        btnText.text = "Max";
+                        buyBtn.interactable = false;
+                    }
+                }
                 else
                 {
                     // Default handler for other items
                     HandleDefaultUpgrade(item);
                 }
             });
+
 
             // Check and apply max upgrade state on initialization
             ApplyMaxUpgradeState(item, nameText, btnImg, btnText, buyBtn);
@@ -803,7 +943,19 @@ namespace EasyUpgrades
                     buyBtn.interactable = false;
                 }
             }
+            else if (item.Name.StartsWith("Max Workers"))
+            {
+                int workersUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "MaxWorkersUpgrade");
+                if (workersUpgrades >= EasyUpgradesMain.MaxWorkersUpgradeLimit)
+                {
+                    nameText.text = $"Max Workers ({workersUpgrades}/3)";
+                    btnImg.color = Color.red;
+                    btnText.text = "Max";
+                    buyBtn.interactable = false;
+                }
+            }
         }
+
 
         private void HandleBackpackUpgrade(UpgradeItem item, TextMeshProUGUI nameText, Image btnImg, TextMeshProUGUI btnText, Button buyBtn)
         {
