@@ -7,18 +7,270 @@ using UnityEngine.UI;
 using TMPro;
 using MelonLoader;
 using MelonLoader.Utils;
-using ScheduleOne.UI;           // Contains App<T>
-using ScheduleOne.UI.Phone;     // Contains Phone, HomeScreen, etc
-using ScheduleOne.DevUtilities; // Contains PlayerSingleton
+using ScheduleOne.UI;
+using ScheduleOne.UI.Phone;
+using ScheduleOne.DevUtilities;
+using ScheduleOne.Storage;
 
 namespace EasyUpgrades
 {
     public class EasyUpgradesMain : MelonMod
     {
+        // Backpack constants and variables
+        private const int ROWS = 4;
+        private const int COLUMNS = 3;
+        private const KeyCode TOGGLE_KEY = KeyCode.B;
+        private StorageEntity backpackEntity;
+        private bool backpackInitialized;
+        private int backpackLevel = 0;
+        private string currentSaveOrganisation = "";
+
+        // MelonPrefs categories and entries
+        private const string PREFS_CATEGORY = "EasyUpgrades";
+        private const string PREF_BACKPACK_LEVEL = "BackpackLevel";
+        private const string PREF_SAVE_ORGANISATION = "SaveOrganisation";
+
+        // Static instance for other methods to access
+        public static EasyUpgradesMain Instance { get; private set; }
+
+        public override void OnInitializeMelon()
+        {
+            Instance = this;
+            MelonLogger.Msg("EasyUpgrades Mod loaded.");
+
+            // Register MelonPrefs
+            MelonPreferences.CreateCategory(PREFS_CATEGORY);
+            MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_BACKPACK_LEVEL, 0, "Backpack upgrade level");
+            MelonPreferences.CreateEntry(PREFS_CATEGORY, PREF_SAVE_ORGANISATION, "", "Current save organisation name");
+
+            // Load preferences
+            backpackLevel = MelonPreferences.GetEntryValue<int>(PREFS_CATEGORY, PREF_BACKPACK_LEVEL);
+            currentSaveOrganisation = MelonPreferences.GetEntryValue<string>(PREFS_CATEGORY, PREF_SAVE_ORGANISATION);
+
+            MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Save: {currentSaveOrganisation}");
+            MelonLogger.Msg("BackpackMod initialized.");
+            MelonLogger.Error("--WARNING-- Items in this backpack will be LOST when you exit the game or the save!");
+        }
+
         public override void OnApplicationStart()
         {
-            MelonLogger.Msg("EasyUpgrades Mod loaded.");
             MelonCoroutines.Start(SetupUpgradesApp());
+
+            // Find current save organization
+            MelonCoroutines.Start(CheckCurrentSave());
+        }
+
+        private IEnumerator CheckCurrentSave()
+        {
+            // Wait a bit for the game to load
+            yield return new WaitForSeconds(5f);
+
+            // Try to find the SaveInfo by name since we can't use FindObjectsOfType
+            // This is just placeholder code - you may need a different approach to get the save info
+            GameObject saveInfoObj = GameObject.Find("SaveInfo");
+            if (saveInfoObj != null)
+            {
+                // Try to access the organisation name through a component
+                // This is just an example and will need to be adapted for your game
+                var component = saveInfoObj.GetComponent<MonoBehaviour>();
+                if (component != null)
+                {
+                    // Example: Use reflection to get the organisation name field
+                    var field = component.GetType().GetField("OrganisationName");
+                    if (field != null)
+                    {
+                        string newOrg = (string)field.GetValue(component);
+                        MelonLogger.Msg($"Current save organisation: {newOrg}");
+
+                        // Update current organization
+                        currentSaveOrganisation = newOrg;
+                        MelonPreferences.SetEntryValue(PREFS_CATEGORY, PREF_SAVE_ORGANISATION, currentSaveOrganisation);
+                        MelonPreferences.Save();
+                    }
+                }
+            }
+            else
+            {
+                MelonLogger.Warning("Couldn't find SaveInfo to detect current save");
+            }
+        }
+
+        public override void OnSceneWasInitialized(int buildIndex, string sceneName)
+        {
+            MelonLogger.Msg($"Scene initialized: {sceneName}");
+
+            if (sceneName != "Main")
+            {
+                if (backpackEntity != null)
+                {
+                    backpackEntity.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            // Only set up the backpack if the player has purchased it
+            if (backpackLevel > 0)
+            {
+                MelonLogger.Msg($"Player has backpack level {backpackLevel}, setting up backpack...");
+                MelonCoroutines.Start(SetupBackpack());
+            }
+            else
+            {
+                MelonLogger.Msg("Player hasn't purchased backpack yet");
+            }
+        }
+
+        private IEnumerator SetupBackpack()
+        {
+            MelonLogger.Msg("Setting up backpack...");
+
+            // Wait for game to initialize
+            yield return new WaitForSeconds(3f);
+
+            // Find player
+            GameObject playerObj = GameObject.Find("Player");
+            if (playerObj == null)
+            {
+                MelonLogger.Error("Could not find Player GameObject!");
+                yield break;
+            }
+
+            MelonLogger.Msg("Found Player, looking for existing storage entities to clone...");
+
+            // Find existing storage entities
+            StorageEntity[] existingEntities = UnityEngine.Object.FindObjectsOfType<StorageEntity>();
+            if (existingEntities.Length == 0)
+            {
+                MelonLogger.Error("No existing StorageEntity objects found in the scene!");
+                yield break;
+            }
+
+            MelonLogger.Msg($"Found {existingEntities.Length} StorageEntity objects");
+
+            // Find a good template entity (like the Shitbox_Police)
+            StorageEntity templateEntity = null;
+            foreach (var entity in existingEntities)
+            {
+                if (entity.name.Contains("Shitbox_Police"))
+                {
+                    templateEntity = entity;
+                    MelonLogger.Msg($"Found ideal template entity: {entity.name}");
+                    break;
+                }
+            }
+
+            // If we didn't find the specific one, use any working entity
+            if (templateEntity == null)
+            {
+                foreach (var entity in existingEntities)
+                {
+                    if (entity.ItemSlots != null && entity.ItemSlots.Count > 0 &&
+                        entity.GetComponent<FishNet.Object.NetworkObject>() != null)
+                    {
+                        templateEntity = entity;
+                        MelonLogger.Msg($"Using template entity: {entity.name}");
+                        break;
+                    }
+                }
+            }
+
+            if (templateEntity == null)
+            {
+                MelonLogger.Error("Could not find a suitable template entity!");
+                yield break;
+            }
+
+            // Create our backpack by instantiating a copy of the template
+            GameObject backpackObj = UnityEngine.Object.Instantiate(templateEntity.gameObject, playerObj.transform);
+            backpackObj.name = "PlayerBackpack";
+            backpackObj.transform.localPosition = Vector3.zero;
+
+            // Get the storage entity component
+            backpackEntity = backpackObj.GetComponent<StorageEntity>();
+
+            // Configure it
+            if (backpackEntity != null)
+            {
+                // Set properties
+                backpackEntity.StorageEntityName = "Backpack";
+                backpackEntity.StorageEntitySubtitle = "Personal Storage";
+                backpackEntity.MaxAccessDistance = 0f;
+                backpackEntity.EmptyOnSleep = true;
+
+                // Clear any contents
+                backpackEntity.ClearContents();
+
+                MelonLogger.Msg($"Backpack created with {backpackEntity.ItemSlots.Count} slots (level {backpackLevel})");
+                backpackInitialized = true;
+                MelonLogger.Msg("Backpack setup complete!");
+            }
+            else
+            {
+                MelonLogger.Error("Failed to get StorageEntity component from the cloned object!");
+                UnityEngine.Object.Destroy(backpackObj);
+            }
+        }
+
+        public override void OnUpdate()
+        {
+            // Only handle backpack toggling if the player has purchased it
+            if (backpackLevel > 0 && backpackInitialized && backpackEntity != null)
+            {
+                if (Input.GetKeyDown(TOGGLE_KEY))
+                {
+                    MelonLogger.Msg("B key pressed, toggling backpack...");
+
+                    try
+                    {
+                        // Use the storage menu directly
+                        var storageMenu = UnityEngine.Object.FindObjectOfType<ScheduleOne.UI.StorageMenu>();
+                        if (storageMenu != null)
+                        {
+                            if (backpackEntity.IsOpened)
+                            {
+                                MelonLogger.Msg("Closing backpack via StorageMenu");
+                                storageMenu.CloseMenu();
+                            }
+                            else
+                            {
+                                MelonLogger.Msg("Opening backpack via StorageMenu");
+                                storageMenu.Open(backpackEntity);
+                            }
+                        }
+                        else
+                        {
+                            MelonLogger.Error("StorageMenu not found, cannot toggle backpack");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Error($"Error toggling backpack: {ex.Message}");
+                        MelonLogger.Error(ex.StackTrace);
+                    }
+                }
+            }
+        }
+
+        // Method for upgrading backpack
+        public void UpgradeBackpack(int level)
+        {
+            MelonLogger.Msg($"Upgrade requested to level {level}");
+
+            // Update backpack level
+            backpackLevel = level;
+
+            // Save to preferences
+            MelonPreferences.SetEntryValue(PREFS_CATEGORY, PREF_BACKPACK_LEVEL, backpackLevel);
+            MelonPreferences.Save();
+
+            MelonLogger.Msg($"Saved backpack level {backpackLevel} to preferences");
+
+            // If this is the first upgrade, we need to create the backpack
+            if (level == 1 && (backpackEntity == null || !backpackInitialized))
+            {
+                MelonLogger.Msg("First backpack upgrade - creating backpack");
+                MelonCoroutines.Start(SetupBackpack());
+            }
         }
 
         private IEnumerator SetupUpgradesApp()
@@ -47,7 +299,6 @@ namespace EasyUpgrades
             upgradesAppGO.AddComponent<UpgradesApp>();
 
             MelonLogger.Msg("Upgrades App instantiated.");
-            yield break;
         }
     }
 
@@ -70,7 +321,7 @@ namespace EasyUpgrades
     {
         private List<UpgradeItem> upgrades = new List<UpgradeItem>()
         {
-            new UpgradeItem("BackPack (0/2)", 100, Color.green),
+            new UpgradeItem("BackPack (0/1)", 100, Color.green),
             new UpgradeItem("Stack Size (0/2)", 100, Color.yellow),
             new UpgradeItem("Vehicle Storage (0/2)", 100, Color.magenta),
             new UpgradeItem("Sprint Speed (0/3)", 100, Color.cyan),
@@ -139,6 +390,14 @@ namespace EasyUpgrades
             base.Start();
             bool wasActive = this.appContainer.gameObject.activeSelf;
             this.appContainer.gameObject.SetActive(true);
+
+            // Update backpack upgrade level based on saved data
+            int backpackLevel = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "BackpackLevel");
+            if (backpackLevel > 0 && upgrades.Count > 0)
+            {
+                // Update the displayed backpack level
+                upgrades[0].Name = $"BackPack ({backpackLevel}/1)";
+            }
 
             // Create a Grid Layout
             GameObject gridContainer = new GameObject("GridContainer");
@@ -309,10 +568,48 @@ namespace EasyUpgrades
             btnText.color = Color.white;
             btnText.fontStyle = FontStyles.Bold;
 
-            buyBtn.onClick.AddListener(() =>
+            // Add click handler for the button - special handling for backpack
+            if (item.Name.StartsWith("BackPack"))
             {
-                MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
-            });
+                buyBtn.onClick.AddListener(() =>
+                {
+                    MelonLogger.Msg($"Buying {item.Name} for ${item.Price}");
+
+                    // Parse current level from item name (e.g., "BackPack (0/1)")
+                    string levelStr = item.Name.Substring(item.Name.IndexOf("(") + 1, 1);
+                    int currentLevel;
+                    if (int.TryParse(levelStr, out currentLevel))
+                    {
+                        MelonLogger.Msg($"Current backpack level: {currentLevel}");
+
+                        // Check if we can upgrade further
+                        if (currentLevel < 1) // Max level is 1
+                        {
+                            // Upgrade the backpack to level 1
+                            EasyUpgradesMain.Instance.UpgradeBackpack(1);
+
+                            // Update the display name
+                            nameText.text = "BackPack (1/1)";
+                        }
+                        else
+                        {
+                            MelonLogger.Msg("Backpack already at max level!");
+                        }
+                    }
+                    else
+                    {
+                        MelonLogger.Error("Failed to parse backpack level from name!");
+                    }
+                });
+            }
+            else
+            {
+                // Default handler for other items
+                buyBtn.onClick.AddListener(() =>
+                {
+                    MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
+                });
+            }
 
             MelonLogger.Msg("Created card for item: " + item.Name);
         }
