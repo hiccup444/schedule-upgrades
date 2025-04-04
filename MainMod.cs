@@ -11,6 +11,8 @@ using ScheduleOne.UI;
 using ScheduleOne.UI.Phone;
 using ScheduleOne.DevUtilities;
 using ScheduleOne.Storage;
+using ScheduleOne.Money;
+using ScheduleOne.PlayerScripts;
 
 namespace EasyUpgrades
 {
@@ -48,8 +50,8 @@ namespace EasyUpgrades
             currentSaveOrganisation = MelonPreferences.GetEntryValue<string>(PREFS_CATEGORY, PREF_SAVE_ORGANISATION);
 
             MelonLogger.Msg($"Loaded preferences - Backpack Level: {backpackLevel}, Save: {currentSaveOrganisation}");
-            MelonLogger.Msg("BackpackMod initialized.");
-            MelonLogger.Error("--WARNING-- Items in this backpack will be LOST when you exit the game or the save!");
+            MelonLogger.Msg("BackpackMod initialized. Thank you to Tugakit for the code reference.");
+            MelonLogger.Error("Items in this backpack will be LOST when you exit the game or the save!");
         }
 
         public override void OnApplicationStart()
@@ -65,17 +67,14 @@ namespace EasyUpgrades
             // Wait a bit for the game to load
             yield return new WaitForSeconds(5f);
 
-            // Try to find the SaveInfo by name since we can't use FindObjectsOfType
-            // This is just placeholder code - you may need a different approach to get the save info
             GameObject saveInfoObj = GameObject.Find("SaveInfo");
             if (saveInfoObj != null)
             {
-                // Try to access the organisation name through a component
-                // This is just an example and will need to be adapted for your game
+
                 var component = saveInfoObj.GetComponent<MonoBehaviour>();
                 if (component != null)
                 {
-                    // Example: Use reflection to get the organisation name field
+
                     var field = component.GetType().GetField("OrganisationName");
                     if (field != null)
                     {
@@ -193,7 +192,7 @@ namespace EasyUpgrades
             {
                 // Set properties
                 backpackEntity.StorageEntityName = "Backpack";
-                backpackEntity.StorageEntitySubtitle = "Personal Storage";
+                backpackEntity.StorageEntitySubtitle = "Items will be LOST when you log out, if left in backpack!";
                 backpackEntity.MaxAccessDistance = 0f;
                 backpackEntity.EmptyOnSleep = true;
 
@@ -334,6 +333,42 @@ namespace EasyUpgrades
         };
 
         private RectTransform _containerRT;
+
+        private bool TrySpendMoney(int amount)
+        {
+            try
+            {
+                // Get the MoneyManager instance
+                var moneyManager = NetworkSingleton<MoneyManager>.Instance;
+
+                // Check if the player has enough online balance
+                float currentOnlineBalance = moneyManager.sync___get_value_onlineBalance();
+                if (currentOnlineBalance >= amount)
+                {
+                    // Deduct the money via the game's transaction system
+                    moneyManager.CreateOnlineTransaction("Upgrade Purchase", -amount, 1, "Upgrade Purchase");
+                    return true;
+                }
+
+                // Optional: Check cash balance if online balance is insufficient
+                var playerInventory = PlayerSingleton<PlayerInventory>.Instance;
+                if (playerInventory.cashInstance.Balance >= amount)
+                {
+                    // Deduct from cash balance
+                    moneyManager.ChangeCashBalance(-amount);
+                    return true;
+                }
+
+                // Not enough money
+                MelonLogger.Msg("Not enough money for purchase!");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Error checking/spending money: {ex.Message}");
+                return false;
+            }
+        }
 
         protected override void Awake()
         {
@@ -569,27 +604,37 @@ namespace EasyUpgrades
             btnText.fontStyle = FontStyles.Bold;
 
             // Add click handler for the button - special handling for backpack
-            if (item.Name.StartsWith("BackPack"))
+            buyBtn.onClick.AddListener(() =>
             {
-                buyBtn.onClick.AddListener(() =>
+                if (item.Name.StartsWith("BackPack"))
                 {
-                    MelonLogger.Msg($"Buying {item.Name} for ${item.Price}");
-
-                    // Parse current level from item name (e.g., "BackPack (0/1)")
+                    // Parse current level from item name
                     string levelStr = item.Name.Substring(item.Name.IndexOf("(") + 1, 1);
                     int currentLevel;
                     if (int.TryParse(levelStr, out currentLevel))
                     {
-                        MelonLogger.Msg($"Current backpack level: {currentLevel}");
-
                         // Check if we can upgrade further
                         if (currentLevel < 1) // Max level is 1
                         {
-                            // Upgrade the backpack to level 1
-                            EasyUpgradesMain.Instance.UpgradeBackpack(1);
+                            // Try to spend money first
+                            if (TrySpendMoney(item.Price))
+                            {
+                                // Upgrade the backpack
+                                EasyUpgradesMain.Instance.UpgradeBackpack(1);
 
-                            // Update the display name
-                            nameText.text = "BackPack (1/1)";
+                                // Update the display name
+                                nameText.text = "BackPack (1/1)";
+
+                                // Disable the button
+                                btnImg.color = Color.red;
+                                btnText.text = "Max";
+                                buyBtn.interactable = false;
+                            }
+                            else
+                            {
+                                MelonLogger.Msg("Cannot afford backpack upgrade!");
+                                // Maybe a "not enough money" popup later?
+                            }
                         }
                         else
                         {
@@ -600,20 +645,25 @@ namespace EasyUpgrades
                     {
                         MelonLogger.Error("Failed to parse backpack level from name!");
                     }
-                });
-            }
-            else
-            {
-                // Default handler for other items
-                buyBtn.onClick.AddListener(() =>
+                }
+                else
                 {
-                    MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
-                });
-            }
+                    // Default handler for other items
+                    if (TrySpendMoney(item.Price))
+                    {
+                        MelonLogger.Msg($"Bought {item.Name} for ${item.Price}");
+                        // Add specific upgrade logic for other items
+                    }
+                    else
+                    {
+                        MelonLogger.Msg($"Cannot afford {item.Name}!");
+                        // Optional: Show a "Not enough money" popup or visual indicator
+                    }
+                }
+            });
 
             MelonLogger.Msg("Created card for item: " + item.Name);
         }
-
         // Simple placeholder sprite
         private Sprite CreatePlaceholderSprite(Color color)
         {
