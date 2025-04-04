@@ -142,8 +142,7 @@ namespace EasyUpgrades
 
         private IEnumerator RetryStackLimitPatch()
         {
-            // Wait 10 seconds before attempting to patch
-            yield return new WaitForSeconds(10f);
+            while (PlayerSingleton<AppsCanvas>.Instance == null) { yield return null; }
 
             try
             {
