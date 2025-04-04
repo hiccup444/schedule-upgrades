@@ -24,7 +24,7 @@ namespace EasyUpgrades
 
         // Static fields to track stack limit upgrades
         public static int CurrentStackLimit { get; private set; } = 20; // Starting value
-        public static int MaxStackLimitUpgrades { get; } = 3; // Maximum number of upgrades
+        public static int MaxStackLimitUpgrades { get; } = 4; // Maximum number of upgrades
         public static int CurrentStackLimitUpgrades { get; private set; } = 0;
 
         // Workers
@@ -571,7 +571,7 @@ namespace EasyUpgrades
         private List<UpgradeItem> upgrades = new List<UpgradeItem>()
         {
             new UpgradeItem("BackPack (0/1)", 100, Color.green),
-            new UpgradeItem("Stack Size (0/3)", 100, Color.yellow),
+            new UpgradeItem("Stack Size (0/4)", 100, Color.yellow),
             new UpgradeItem("Vehicle Storage (0/2)", 100, Color.magenta),
             new UpgradeItem("Test", 100, Color.cyan),
             new UpgradeItem("Max Workers", 100, Color.red),
@@ -685,10 +685,13 @@ namespace EasyUpgrades
                 upgrades[0].Name = $"BackPack ({backpackLevel}/1)";
             }
 
-            if (stackLimitUpgrades >= 3 && upgrades.Count > 1)
+            if (stackLimitUpgrades >= EasyUpgradesMain.MaxStackLimitUpgrades && upgrades.Count > 1)
             {
-                // Update the displayed stack size level
-                upgrades[1].Name = $"Stack Size ({stackLimitUpgrades}/3)";
+                upgrades[1].Name = $"Stack Size ({stackLimitUpgrades}/4)";
+            }
+            else if (upgrades.Count > 1)
+            {
+                upgrades[1].Name = $"Stack Size ({stackLimitUpgrades}/4)";
             }
 
             int workersUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "MaxWorkersUpgrade");
@@ -935,9 +938,9 @@ namespace EasyUpgrades
             else if (item.Name.StartsWith("Stack Size"))
             {
                 int stackLimitUpgrades = MelonPreferences.GetEntryValue<int>("EasyUpgrades", "StackLimitUpgrades");
-                if (stackLimitUpgrades >= 3)
+                if (stackLimitUpgrades >= 4)
                 {
-                    nameText.text = $"Stack Size ({stackLimitUpgrades}/3)";
+                    nameText.text = $"Stack Size ({stackLimitUpgrades}/4)";
                     btnImg.color = Color.red;
                     btnText.text = "Max";
                     buyBtn.interactable = false;
@@ -1006,7 +1009,7 @@ namespace EasyUpgrades
             // Stack Size upgrade logic
             int currentUpgrades = EasyUpgradesMain.CurrentStackLimitUpgrades;
 
-            if (currentUpgrades < 3)
+            if (currentUpgrades < EasyUpgradesMain.MaxStackLimitUpgrades)
             {
                 // Try to spend money first
                 if (TrySpendMoney(item.Price))
@@ -1014,11 +1017,11 @@ namespace EasyUpgrades
                     // Upgrade the stack limit
                     EasyUpgradesMain.Instance.UpgradeStackLimit();
 
-                    // Update the display name
-                    nameText.text = $"Stack Size ({currentUpgrades + 1}/3)";
+                    // Update the display name using the new max value (4)
+                    nameText.text = $"Stack Size ({currentUpgrades + 1}/{EasyUpgradesMain.MaxStackLimitUpgrades})";
 
                     // Check if max upgrades reached
-                    if (currentUpgrades + 1 >= 3)
+                    if (currentUpgrades + 1 >= EasyUpgradesMain.MaxStackLimitUpgrades)
                     {
                         // Disable the button
                         btnImg.color = Color.red;
