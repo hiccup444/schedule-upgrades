@@ -314,13 +314,18 @@ namespace EasyUpgrades
         private IEnumerator SetupBackpack()
         {
             MelonLogger.Msg("Setting up backpack...");
-            yield return new WaitForSeconds(3f);
+            // Wait until the AppsCanvas singleton is available.
+            while (PlayerSingleton<AppsCanvas>.Instance == null)
+                yield return null;
+
+            // Once AppsCanvas is available, assume the player is fully loaded.
             GameObject playerObj = GameObject.Find("Player");
             if (playerObj == null)
             {
                 MelonLogger.Error("Could not find Player GameObject!");
                 yield break;
             }
+
             MelonLogger.Msg("Found Player, looking for existing storage entities to clone...");
             StorageEntity[] existingEntities = UnityEngine.Object.FindObjectsOfType<StorageEntity>();
             if (existingEntities.Length == 0)
@@ -328,8 +333,8 @@ namespace EasyUpgrades
                 MelonLogger.Error("No existing StorageEntity objects found in the scene!");
                 yield break;
             }
-            MelonLogger.Msg($"Found {existingEntities.Length} StorageEntity objects");
 
+            MelonLogger.Msg($"Found {existingEntities.Length} StorageEntity objects");
             StorageEntity templateEntity = existingEntities.FirstOrDefault(entity => entity.name.Contains("Shitbox_Police"));
             if (templateEntity == null)
             {
@@ -368,7 +373,6 @@ namespace EasyUpgrades
                 UnityEngine.Object.Destroy(backpackObj);
             }
         }
-
         public override void OnUpdate()
         {
             if (backpackLevel > 0 && backpackInitialized && backpackEntity != null)
