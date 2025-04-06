@@ -24,6 +24,7 @@ namespace EasyUpgrades
     public class EasyUpgradesMain : MelonMod
     {
         // Static fields to track upgrades
+        private static bool originalStackLimitsCaptured = false;
         public static int CurrentStackLimitUpgrades { get; private set; } = 0;
         public static int MaxStackLimitUpgrades { get; } = 4;
 
@@ -139,6 +140,14 @@ namespace EasyUpgrades
 
                     // Immediately re-run the stack limit patch so that item definitions update to the new value.
                     MelonCoroutines.Start(RetryStackLimitPatch());
+
+                    // Force a UI refresh: if an UpgradesApp already exists, destroy it and re-instantiate it.
+                    GameObject existingApp = GameObject.Find("UpgradesApp");
+                    if (existingApp != null)
+                    {
+                        UnityEngine.Object.Destroy(existingApp);
+                        MelonCoroutines.Start(SetupUpgradesApp());
+                    }
                 }
             }
             else
@@ -147,6 +156,7 @@ namespace EasyUpgrades
             }
             preferencesLoaded = true;
         }
+
 
         public override void OnSceneWasInitialized(int buildIndex, string sceneName)
         {
@@ -172,16 +182,14 @@ namespace EasyUpgrades
             }
         }
 
+
         private IEnumerator MainSceneInit()
         {
-            // Wait until preferences are loaded.
             yield return new WaitUntil(() => preferencesLoaded);
 
-            // Now that preferences are loaded, update item stack limits and employee capacities.
             yield return RetryStackLimitPatch();
             yield return UpdateEmployeeCapacitiesWhenReady();
 
-            // Set up backpack after preferences are loaded.
             if (backpackLevel > 0)
             {
                 MelonLogger.Msg($"Player has backpack level {backpackLevel}, setting up backpack...");
@@ -192,7 +200,7 @@ namespace EasyUpgrades
                 MelonLogger.Msg("Player hasn't purchased backpack yet");
             }
 
-            // Instantiate the Upgrades App.
+            // Instantiate the Upgrades App (only once per scene load)
             MelonCoroutines.Start(SetupUpgradesApp());
         }
 
@@ -224,13 +232,14 @@ namespace EasyUpgrades
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (stackLimitField != null)
                     {
-                        // Store the original value if not already done.
-                        if (!OriginalStackLimits.ContainsKey(def))
+                        // Capture the base (original) value only once.
+                        if (!originalStackLimitsCaptured && !OriginalStackLimits.ContainsKey(def))
                         {
                             int orig = (int)stackLimitField.GetValue(def);
                             OriginalStackLimits[def] = orig;
                         }
-                        int newLimit = OriginalStackLimits[def] + (CurrentStackLimitUpgrades * UpgradeIncrement);
+                        int baseLimit = OriginalStackLimits.ContainsKey(def) ? OriginalStackLimits[def] : (int)stackLimitField.GetValue(def);
+                        int newLimit = baseLimit + (CurrentStackLimitUpgrades * UpgradeIncrement);
                         stackLimitField.SetValue(def, newLimit);
                         MelonLogger.Msg($"Updated {def.Name} stack limit to {newLimit}");
                     }
@@ -244,6 +253,7 @@ namespace EasyUpgrades
                     MelonLogger.Error($"Error updating stack limit for {def.Name}: {ex.Message}");
                 }
             }
+            originalStackLimitsCaptured = true;
 
             // Patch the getter as a backup.
             var methods = typeof(ItemDefinition).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
@@ -262,6 +272,7 @@ namespace EasyUpgrades
             }
             yield break;
         }
+
 
         private static void StackLimitPatch(ItemDefinition __instance, ref int __result)
         {
@@ -427,11 +438,46 @@ namespace EasyUpgrades
 
         private IEnumerator SetupUpgradesApp()
         {
+            // Wait until HomeScreen and preferences are ready.
             while (PlayerSingleton<HomeScreen>.Instance == null)
                 yield return null;
-            // Wait until preferences are loaded.
             while (!preferencesLoaded)
                 yield return null;
+
+            // Always destroy the existing UpgradesApp UI if it exists.
+            GameObject existingApp = GameObject.Find("UpgradesApp");
+            if (existingApp != null)
+            {
+                MelonLogger.Msg("Destroying existing UpgradesApp.");
+                UnityEngine.Object.Destroy(existingApp);
+                yield return null; // wait one frame for proper destruction
+            }
+
+            // Also remove the associated icon.
+            // Option 1: If you have renamed your icon (e.g. "EasyUpgradesAppIcon"), use that:
+            GameObject existingIcon = GameObject.Find("EasyUpgradesAppIcon");
+            if (existingIcon != null)
+            {
+                MelonLogger.Msg("Destroying existing EasyUpgradesAppIcon.");
+                UnityEngine.Object.Destroy(existingIcon);
+                yield return null;
+            }
+            else
+            {
+                // Option 2: If your icon is always at a specific index in the AppIcons container, remove that.
+                GameObject appIconsContainer = GameObject.Find("Player_Local/CameraContainer/Camera/OverlayCamera/GameplayMenu/Phone/phone/HomeScreen/AppIcons");
+                if (appIconsContainer != null && appIconsContainer.transform.childCount > 7)
+                {
+                    Transform iconToRemove = appIconsContainer.transform.GetChild(7);
+                    if (iconToRemove != null)
+                    {
+                        MelonLogger.Msg("Removing the icon at index 7 from AppIcons container.");
+                        UnityEngine.Object.Destroy(iconToRemove.gameObject);
+                        yield return null;
+                    }
+                }
+            }
+
             GameObject appsCanvas = GameObject.Find("Player_Local/CameraContainer/Camera/OverlayCamera/GameplayMenu/Phone/phone/AppsCanvas");
             if (appsCanvas == null)
             {
@@ -447,6 +493,7 @@ namespace EasyUpgrades
             upgradesRT.offsetMax = Vector2.zero;
             upgradesAppGO.AddComponent<UpgradesApp>();
             MelonLogger.Msg("Upgrades App instantiated.");
+            yield break;
         }
     }
 
